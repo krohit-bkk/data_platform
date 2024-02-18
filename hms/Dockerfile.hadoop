@@ -1,0 +1,70 @@
+# Use the official Ubuntu Linux image for ARM64
+FROM ubuntu:latest
+
+# Adding general shell commands 
+# Useful for debugging the container
+RUN apt-get update && apt-get install -y openjdk-8-jdk wget vim cron procps ssh openssh-server
+RUN echo "alias ll='ls -lrt'" >> ~/.bashrc
+
+# Working directory
+WORKDIR /opt/
+
+# Copy setup files
+COPY ./bashrc_file.sh  /opt/
+COPY ./hadoop-setup.sh /opt/
+COPY ./hive-setup.sh   /opt/
+COPY ./entrypoint.sh   /opt/
+RUN  chmod +x /opt/entrypoint.sh
+
+# Setup bashrc for root
+RUN echo " " >> ~/.bashrc
+RUN cat /opt/bashrc_file.sh >> ~/.bashrc
+
+RUN mkdir -p /run/sshd \
+    && chown -R root:root /run/sshd
+
+# Root user ssh key
+RUN mkdir -p /home/root/.ssh
+RUN chown -R root:root /home/root/.ssh
+RUN ssh-keygen -t rsa -P '' -f ~/.ssh/id_rsa 
+RUN cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys 
+RUN chmod 0600 ~/.ssh/authorized_keys 
+
+# Local runs
+COPY hadoop-3.1.0.tar.gz /opt/
+COPY apache-hive-3.1.0-bin.tar.gz /opt/
+
+# Automated runs
+# RUN wget https://archive.apache.org/dist/hadoop/common/hadoop-3.1.0/hadoop-3.1.0.tar.gz
+# RUN wget https://archive.apache.org/dist/hive/hive-3.1.0/apache-hive-3.1.0-bin.tar.gz
+
+# Unzip the tar files
+RUN tar -xzf hadoop-3.1.0.tar.gz && rm -f hadoop-3.1.0.tar.gz
+RUN tar -xzf apache-hive-3.1.0-bin.tar.gz && rm -f apache-hive-3.1.0-bin.tar.gz 
+RUN mv hadoop-3.1.0 hadoop
+RUN mv apache-hive-3.1.0-bin hive
+
+# Backup hadoop config files
+RUN mv /opt/hadoop/etc/hadoop/hadoop-env.sh /opt/hadoop/etc/hadoop/hadoop-env.sh_BCKP
+RUN mv /opt/hadoop/etc/hadoop/core-site.xml /opt/hadoop/etc/hadoop/core-site.xml_BCKP
+RUN mv /opt/hadoop/etc/hadoop/hdfs-site.xml /opt/hadoop/etc/hadoop/hdfs-site.xml_BCKP
+RUN mv /opt/hadoop/etc/hadoop/mapred-site.xml /opt/hadoop/etc/hadoop/mapred-site.xml_BCKP
+RUN mv /opt/hadoop/etc/hadoop/yarn-site.xml /opt/hadoop/etc/hadoop/yarn-site.xml_BCKP
+
+# Copy modified config files
+COPY ./hadoop_conf_files/* /opt/hadoop/etc/hadoop/
+
+# Run setup scripts for hadoop and hive
+RUN bash /opt/hadoop-setup.sh
+
+# Example: Run a command to keep the container running
+USER root
+ENV HDFS_NAMENODE_USER=root
+ENV HDFS_DATANODE_USER=root
+ENV HDFS_SECONDARYNAMENODE_USER=root
+ENV YARN_NODEMANAGER_USER=root
+ENV YARN_RESOURCEMANAGER_USER=root
+ENV PDSH_RCMD_TYPE=ssh
+
+ENTRYPOINT ["/opt/entrypoint.sh"]
+CMD ["tail", "-f", "/dev/null"]
